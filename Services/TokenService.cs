@@ -1,19 +1,16 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text;
 using JwtRoleAuthentication.Models;
+using Microsoft.IdentityModel.Tokens;
 
 namespace JwtRoleAuthentication.Services;
-
-using System.IdentityModel.Tokens.Jwt;
-using Microsoft.IdentityModel.Tokens;
-using System.Security.Claims;
-using System.Text;
-using Microsoft.Extensions.Configuration;
 
 public class TokenService
 {
     public const int AccessTokenExpirationMinutes = 60;
     public const int RefreshTokenExpirationDays = 7;
-
     private readonly ILogger<TokenService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -37,22 +34,59 @@ public class TokenService
         
         return tokenHandler.WriteToken(token);
     }
-    
-    public string GenerateRefreshToken()
+
+    public string GenerateRefreshToken(ApplicationUser user)
     {
-        var randomNumber = new byte[32];
-        using (var rng = RandomNumberGenerator.Create())
+        var timestamp = DateTimeOffset.UtcNow.AddDays(RefreshTokenExpirationDays).ToUnixTimeSeconds();
+        var tokenData = $"{user.Id}:{timestamp}";
+        var secret = _configuration["JwtTokenSettings:SymmetricSecurityKey"];
+        
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(tokenData));
+        var signature = Convert.ToBase64String(hash);
+        
+        var refreshToken = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{tokenData}:{signature}"));
+        return refreshToken;
+    }
+
+    public (bool isValid, string userId) ValidateRefreshToken(string refreshToken)
+    {
+        try
         {
-            rng.GetBytes(randomNumber);
-            return Convert.ToBase64String(randomNumber);
+            var tokenBytes = Convert.FromBase64String(refreshToken);
+            var tokenParts = Encoding.UTF8.GetString(tokenBytes).Split(':');
+            
+            if (tokenParts.Length != 3)
+                return (false, null);
+
+            var userId = tokenParts[0];
+            var timestamp = long.Parse(tokenParts[1]);
+            var providedSignature = tokenParts[2];
+
+            var currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (timestamp < currentTime)
+                return (false, null);
+
+            var tokenData = $"{userId}:{timestamp}";
+            var secret = _configuration["JwtTokenSettings:SymmetricSecurityKey"];
+            
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+            var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(tokenData));
+            var computedSignature = Convert.ToBase64String(hash);
+
+            return (providedSignature == computedSignature, userId);
+        }
+        catch
+        {
+            return (false, null);
         }
     }
 
     private JwtSecurityToken CreateJwtToken(List<Claim> claims, SigningCredentials credentials,
-    DateTime expiration) =>
+        DateTime expiration) =>
         new(
-             _configuration["JwtTokenSettings:ValidIssuer"],
-              _configuration["JwtTokenSettings:ValidAudience"],
+            _configuration["JwtTokenSettings:ValidIssuer"],
+            _configuration["JwtTokenSettings:ValidAudience"],
             claims,
             expires: expiration,
             signingCredentials: credentials

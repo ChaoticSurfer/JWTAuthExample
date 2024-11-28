@@ -24,22 +24,20 @@ public class AccountController : ControllerBase
         _tokenService = tokenService;
     }
 
-
     [HttpPost]
     [Route("register")]
     public async Task<IActionResult> Register(RegistrationRequest request)
     {
         if (!ModelState.IsValid)
-        {
             return BadRequest(ModelState);
-        }
 
-        var result = await _userManager.CreateAsync(
-            new ApplicationUser { UserName = request.Username, Email = request.Email, 
-                RefreshToken = _tokenService.GenerateRefreshToken(),
-                RefreshTokenExpiryTime = DateTime.Now.AddDays(TokenService.RefreshTokenExpirationDays)},
-            request.Password!
-        );
+        var user = new ApplicationUser 
+        { 
+            UserName = request.Username, 
+            Email = request.Email
+        };
+        
+        var result = await _userManager.CreateAsync(user, request.Password!);
 
         if (result.Succeeded)
         {
@@ -48,47 +46,35 @@ public class AccountController : ControllerBase
         }
 
         foreach (var error in result.Errors)
-        {
             ModelState.AddModelError(error.Code, error.Description);
-        }
 
         return BadRequest(ModelState);
     }
-
 
     [HttpPost]
     [Route("login")]
     public async Task<ActionResult<AuthResponse>> Authenticate([FromBody] AuthRequest request)
     {
         if (!ModelState.IsValid)
-        {
             return BadRequest(ModelState);
-        }
 
         var user = await _userManager.FindByEmailAsync(request.Email!);
-
         if (user == null)
-        {
             return BadRequest("Bad credentials");
-        }
 
         var isPasswordValid = await _userManager.CheckPasswordAsync(user, request.Password!);
-
         if (!isPasswordValid)
-        {
             return BadRequest("Bad credentials");
-        }
-        
 
         var accessToken = _tokenService.CreateAccessToken(user);
-        await _context.SaveChangesAsync();
+        var refreshToken = _tokenService.GenerateRefreshToken(user);
 
         return Ok(new AuthResponse
         {
             Username = user.UserName,
             Email = user.Email,
             Token = accessToken,
-            RefreshToken = user.RefreshToken,
+            RefreshToken = refreshToken,
             AccessTokenExpiryTime = DateTime.UtcNow.AddMinutes(TokenService.AccessTokenExpirationMinutes),
             ExpirationTokenExpiryTime = DateTime.UtcNow.AddDays(TokenService.RefreshTokenExpirationDays)
         });
@@ -100,23 +86,22 @@ public class AccountController : ControllerBase
         if (tokenModel == null)
             return BadRequest("Invalid client request");
 
-        var user = await _userManager.Users.SingleOrDefaultAsync(u => u.RefreshToken == tokenModel.RefreshToken);
-        if (user == null || user.RefreshTokenExpiryTime <= DateTime.Now)
+        var (isValid, userId) = _tokenService.ValidateRefreshToken(tokenModel.RefreshToken);
+        if (!isValid)
             return BadRequest("Invalid refresh token or token expired");
 
-        var newAccessToken = _tokenService.CreateAccessToken(user);
-        var newRefreshToken = _tokenService.GenerateRefreshToken();
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null)
+            return BadRequest("User not found");
 
-        user.RefreshToken = newRefreshToken;
-        user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(TokenService.RefreshTokenExpirationDays);
-        await _userManager.UpdateAsync(user);
+        var newAccessToken = _tokenService.CreateAccessToken(user);
+        var newRefreshToken = _tokenService.GenerateRefreshToken(user);
 
         return Ok(new
         {
             accessToken = newAccessToken,
-            refreshToken = newRefreshToken,
+            refreshToken = newRefreshToken
         });
     }
 }
-
 
