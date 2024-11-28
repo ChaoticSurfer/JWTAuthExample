@@ -80,7 +80,7 @@ public class AccountController : ControllerBase
         }
         
 
-        var accessToken = _tokenService.CreateToken(user);
+        var accessToken = _tokenService.CreateAccessToken(user);
         await _context.SaveChangesAsync();
 
         return Ok(new AuthResponse
@@ -104,7 +104,7 @@ public class AccountController : ControllerBase
         if (user == null || user.RefreshTokenExpiryTime <= DateTime.Now)
             return BadRequest("Invalid refresh token or token expired");
 
-        var newAccessToken = _tokenService.CreateToken(user);
+        var newAccessToken = _tokenService.CreateAccessToken(user);
         var newRefreshToken = _tokenService.GenerateRefreshToken();
 
         user.RefreshToken = newRefreshToken;

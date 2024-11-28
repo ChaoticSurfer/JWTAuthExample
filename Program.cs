@@ -4,13 +4,17 @@ using JwtRoleAuthentication.Models;
 using JwtRoleAuthentication.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services
+builder.Services.AddTransient<IEmailSender, FakeEmailSender>();
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
@@ -58,6 +62,7 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
     options.Password.RequiredLength = 6;
     options.Password.RequireNonAlphanumeric = false;
     options.Password.RequireUppercase = false;
+    options.SignIn.RequireConfirmedAccount = false;
 })
 .AddEntityFrameworkStores<ApplicationDbContext>()
 .AddDefaultTokenProviders();
@@ -96,8 +101,14 @@ builder.Services.AddCors(options =>
     });
 });
 
+builder.Services.AddIdentityApiEndpoints<ApplicationUser>()
+    .AddEntityFrameworkStores<ApplicationDbContext>();
+
+
+
 // Build the app
 var app = builder.Build();
+
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
@@ -113,5 +124,7 @@ app.UseCors();
 app.UseStatusCodePages();
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapIdentityApi<ApplicationUser>();
 app.MapControllers();
 app.Run();

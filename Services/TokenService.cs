@@ -23,7 +23,7 @@ public class TokenService
         _configuration = configuration;
     }
 
-    public string CreateToken(ApplicationUser user)
+    public string CreateAccessToken(ApplicationUser user)
     {
         var expiration = DateTime.UtcNow.AddMinutes(AccessTokenExpirationMinutes);
         var token = CreateJwtToken(
