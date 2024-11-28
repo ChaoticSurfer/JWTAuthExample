@@ -7,6 +7,6 @@ public class AuthResponse
     public string? Token { get; set; }
     public string? RefreshToken { get; set; }
     
-    public DateTime TokenExpiryTime { set; get; }
-    
+    public DateTime AccessTokenExpiryTime { set; get; }
+    public DateTime ExpirationTokenExpiryTime { get; set; }
 }

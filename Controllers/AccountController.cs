@@ -35,7 +35,9 @@ public class AccountController : ControllerBase
         }
 
         var result = await _userManager.CreateAsync(
-            new ApplicationUser { UserName = request.Username, Email = request.Email, RefreshToken = _tokenService.GenerateRefreshToken(), RefreshTokenExpiryTime = DateTime.Now.AddDays(7)},
+            new ApplicationUser { UserName = request.Username, Email = request.Email, 
+                RefreshToken = _tokenService.GenerateRefreshToken(),
+                RefreshTokenExpiryTime = DateTime.Now.AddDays(TokenService.RefreshTokenExpirationDays)},
             request.Password!
         );
 
@@ -63,36 +65,32 @@ public class AccountController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var managedUser = await _userManager.FindByEmailAsync(request.Email!);
+        var user = await _userManager.FindByEmailAsync(request.Email!);
 
-        if (managedUser == null)
+        if (user == null)
         {
             return BadRequest("Bad credentials");
         }
 
-        var isPasswordValid = await _userManager.CheckPasswordAsync(managedUser, request.Password!);
+        var isPasswordValid = await _userManager.CheckPasswordAsync(user, request.Password!);
 
         if (!isPasswordValid)
         {
             return BadRequest("Bad credentials");
         }
+        
 
-        var userInDb = _context.Users.FirstOrDefault(u => u.Email == request.Email);
-
-        if (userInDb is null)
-        {
-            return Unauthorized();
-        }
-
-        var accessToken = _tokenService.CreateToken(userInDb);
+        var accessToken = _tokenService.CreateToken(user);
         await _context.SaveChangesAsync();
 
         return Ok(new AuthResponse
         {
-            Username = userInDb.UserName,
-            Email = userInDb.Email,
+            Username = user.UserName,
+            Email = user.Email,
             Token = accessToken,
-            RefreshToken = userInDb.RefreshToken,
+            RefreshToken = user.RefreshToken,
+            AccessTokenExpiryTime = DateTime.UtcNow.AddMinutes(TokenService.AccessTokenExpirationMinutes),
+            ExpirationTokenExpiryTime = DateTime.UtcNow.AddDays(TokenService.RefreshTokenExpirationDays)
         });
     }
 
