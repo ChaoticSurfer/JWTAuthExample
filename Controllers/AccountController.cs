@@ -14,10 +14,10 @@ public class AccountController : ControllerBase
 {
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ApplicationDbContext _context;
-    private readonly TokenService _tokenService;
+    private readonly ITokenService _tokenService;
 
     public AccountController(UserManager<ApplicationUser> userManager, ApplicationDbContext context,
-        TokenService tokenService, ILogger<AccountController> logger)
+        ITokenService tokenService, ILogger<AccountController> logger)
     {
         _userManager = userManager;
         _context = context;

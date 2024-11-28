@@ -2,22 +2,27 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using JwtRoleAuthentication.Helpers;
 using JwtRoleAuthentication.Models;
 using Microsoft.IdentityModel.Tokens;
 
 namespace JwtRoleAuthentication.Services;
 
-public class TokenService: ITokenService
+public class AsymmetricTokenService : ITokenService
 {
     public const int AccessTokenExpirationMinutes = 60;
     public const int RefreshTokenExpirationDays = 7;
-    private readonly ILogger<TokenService> _logger;
+    private readonly ILogger<AsymmetricTokenService> _logger;
     private readonly IConfiguration _configuration;
+    private readonly RsaSecurityKey _privateKey;
+    private readonly RsaSecurityKey _publicKey;
 
-    public TokenService(ILogger<TokenService> logger, IConfiguration configuration)
+    public AsymmetricTokenService(ILogger<AsymmetricTokenService> logger, IConfiguration configuration)
     {
         _logger = logger;
         _configuration = configuration;
+        _privateKey = RsaKeyGenerator.GenerateOrLoadKeys();
+        _publicKey = RsaKeyGenerator.LoadPublicKey();
     }
 
     public string CreateAccessToken(ApplicationUser user)
@@ -31,7 +36,6 @@ public class TokenService: ITokenService
         var tokenHandler = new JwtSecurityTokenHandler();
         
         _logger.LogInformation("JWT Token created");
-        
         return tokenHandler.WriteToken(token);
     }
 
@@ -39,14 +43,17 @@ public class TokenService: ITokenService
     {
         var timestamp = DateTimeOffset.UtcNow.AddDays(RefreshTokenExpirationDays).ToUnixTimeSeconds();
         var tokenData = $"{user.Id}:{timestamp}";
-        var secret = _configuration["JwtTokenSettings:SymmetricSecurityKey"];
         
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(tokenData));
-        var signature = Convert.ToBase64String(hash);
+        var rsa = (_privateKey.Rsa as RSA) ?? RSA.Create();
+        var signature = rsa.SignData(
+            Encoding.UTF8.GetBytes(tokenData),
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1
+        );
         
-        var refreshToken = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{tokenData}:{signature}"));
-        return refreshToken;
+        return Convert.ToBase64String(
+            Encoding.UTF8.GetBytes($"{tokenData}:{Convert.ToBase64String(signature)}")
+        );
     }
 
     public (bool isValid, string userId) ValidateRefreshToken(string refreshToken)
@@ -61,20 +68,23 @@ public class TokenService: ITokenService
 
             var userId = tokenParts[0];
             var timestamp = long.Parse(tokenParts[1]);
-            var providedSignature = tokenParts[2];
+            var signature = Convert.FromBase64String(tokenParts[2]);
 
             var currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             if (timestamp < currentTime)
                 return (false, null);
 
             var tokenData = $"{userId}:{timestamp}";
-            var secret = _configuration["JwtTokenSettings:SymmetricSecurityKey"];
+            var rsa = (_publicKey.Rsa as RSA) ?? RSA.Create();
             
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-            var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(tokenData));
-            var computedSignature = Convert.ToBase64String(hash);
+            var isValid = rsa.VerifyData(
+                Encoding.UTF8.GetBytes(tokenData),
+                signature,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1
+            );
 
-            return (providedSignature == computedSignature, userId);
+            return (isValid, userId);
         }
         catch
         {
@@ -96,7 +106,7 @@ public class TokenService: ITokenService
     {        
         try
         {
-            var claims = new List<Claim>
+            return new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new Claim(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()),
@@ -104,8 +114,6 @@ public class TokenService: ITokenService
                 new Claim(ClaimTypes.Name, user.UserName),
                 new Claim(ClaimTypes.Email, user.Email),
             };
-            
-            return claims;
         }
         catch (Exception e)
         {
@@ -114,15 +122,6 @@ public class TokenService: ITokenService
         }
     }
 
-    private SigningCredentials CreateSigningCredentials()
-    {
-        var symmetricSecurityKey = _configuration["JwtTokenSettings:SymmetricSecurityKey"];
-
-        return new SigningCredentials(
-            new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(symmetricSecurityKey)
-            ),
-            SecurityAlgorithms.HmacSha256
-        );
-    }
+    private SigningCredentials CreateSigningCredentials() =>
+        new SigningCredentials(_privateKey, SecurityAlgorithms.RsaSha256);
 }

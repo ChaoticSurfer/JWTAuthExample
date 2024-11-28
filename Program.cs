@@ -1,5 +1,7 @@
+using System.Security.Cryptography;
 using System.Text;
 using JwtRoleAuthentication.Data;
+using JwtRoleAuthentication.Helpers;
 using JwtRoleAuthentication.Models;
 using JwtRoleAuthentication.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -51,7 +53,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(opt =>
     opt.UseSqlite("Data Source = database.db"));
 
 // Register TokenService dependency
-builder.Services.AddScoped<TokenService>();
+builder.Services.AddScoped<ITokenService, AsymmetricTokenService>();
 
 // Add Identity services
 builder.Services.AddIdentityCore<ApplicationUser>(options =>
@@ -74,22 +76,26 @@ var validAudience = builder.Configuration.GetValue<string>("JwtTokenSettings:Val
 var symmetricSecurityKey = builder.Configuration.GetValue<string>("JwtTokenSettings:SymmetricSecurityKey");
 
 builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
-
-})
-.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
-{
-    options.TokenValidationParameters = new TokenValidationParameters
     {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(symmetricSecurityKey)),
-        ValidateIssuer = false,
-        ValidateAudience = false
-    };
-});
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        var publicKey = RSA.Create();
+        publicKey.FromXmlString(File.ReadAllText("public_key.xml"));
+    
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = RsaKeyGenerator.LoadPublicKey(),
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
 
 builder.Services.AddCors(options =>
 {
